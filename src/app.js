@@ -26,4 +26,16 @@ app.use('/api/v1/auth', authRoutes);
 const productRoutes = require('./routes/productRoutes');
 app.use('/api/v1/products', productRoutes);
 
+//Category Routes
+const categoryRoutes = require('./routes/categoryRoutes');
+app.use('/api/v1/categories', categoryRoutes);
+
+//Cart Routes
+const cartRoutes = require('./routes/cartRoutes');
+app.use('/api/v1/cart', cartRoutes);
+
+//Order Routes
+const orderRoutes = require('./routes/orderRoutes');
+app.use('/api/v1/orders', orderRoutes);
+
 module.exports = app;

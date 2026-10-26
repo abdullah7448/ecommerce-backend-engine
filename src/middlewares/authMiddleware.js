@@ -13,7 +13,7 @@ const protect = async (req, res, next) => {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      // ডেটাবেس থেকে ইউজার খুঁজে বের করে req.user-এ সেট করা (পাসওয়ার্ড ছাড়া)
+      // ডেটাবেস থেকে ইউজার খুঁজে বের করে req.user-এ সেট করা (পাসওয়ার্ড ছাড়া)
       req.user = await User.findById(decoded.id).select('-password');
 
       if (!req.user) {
@@ -31,14 +31,16 @@ const protect = async (req, res, next) => {
   }
 };
 
-// ২. অথরাইজেশন বা রোল-বেসড মিডলওয়্যার (নির্দিষ্ট রোল হোল্ডার কি না চেক করে)
-const authorize = (...roles) => {
+// ২. অথরাইজেশন বা রোল-বেসড মিডলওয়্যার (মাল্টি-রোল অ্যারে চেক করার জন্য)
+const authorize = (...allowedRoles) => {
   return (req, res, next) => {
-    // req.user আসার কথা অবশ্যই protect মিডলওয়্যার থেকে
-    if (!req.user || !roles.includes(req.user.role)) {
+    // req.user-এর roles অ্যারে থেকে চেক করা হচ্ছে যে allowedRoles-এর সাথে কোনোটি মিলে কি না
+    const hasPermission = req.user.roles.some((role) => allowedRoles.includes(role));
+
+    if (!req.user || !hasPermission) {
       return res.status(403).json({
         status: 'fail',
-        message: `Role '${req.user ? req.user.role : 'guest'}' is not authorized to access this route`,
+        message: `Your roles ([${req.user ? req.user.roles.join(', ') : 'guest'}]) are not authorized to access this route`,
       });
     }
     next();

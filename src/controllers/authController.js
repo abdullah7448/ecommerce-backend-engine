@@ -1,84 +1,337 @@
 const User = require('../models/userModel');
 const generateToken = require('../utils/generateToken');
 
-// @desc    Register a new user
-// @route   POST /api/v1/auth/register
+// @desc    Register a normal Customer
+// @route   POST /api/v1/auth/register-customer
 // @access  Public
-const registerUser = async (req, res) => {
+const registerCustomer = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password } = req.body;
 
-    // ১. চেক করা এই ইমেইলে অলরেডি কোনো ইউজার আছে কি না
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(400).json({
-        status: 'fail',
-        message: 'User already exists with this email',
-      });
+      return res.status(400).json({ status: 'fail', message: 'User already exists with this email' });
     }
 
-    // ২. নতুন ইউজার তৈরি করা (মডেলের pre('save') হুক অটোমেটিক পাসওয়ার্ড হ্যাশ করে নেবে)
     const user = await User.create({
       name,
       email,
       password,
-      role,
+      roles: ['customer'], // ডিফল্ট রোল কাস্টমার
+      isVerified: true,
     });
 
-    if (user) {
-      // ৩. টোকেন জেনারেট করা
-      const token = generateToken(user._id, user.role);
+    const token = generateToken(user._id);
 
-      res.status(201).json({
-        status: 'success',
-        message: 'User registered successfully',
-        token,
-        data: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      });
-    } else {
-      res.status(400).json({ status: 'fail', message: 'Invalid user data' });
-    }
+    res.status(201).json({
+      status: 'success',
+      message: 'Customer registered successfully',
+      token,
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        roles: user.roles,
+      },
+    });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
   }
 };
 
-// @desc    Authenticate user & get token (Login)
+// @desc    Register as a Vendor (Direct Vendor Signup with Shop Details)
+// @route   POST /api/v1/auth/register-vendor
+// @access  Public
+const registerVendor = async (req, res) => {
+  try {
+    const { name, email, password, shopName, shopDescription, shopAddress, businessLicense, bankAccount } = req.body;
+
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ status: 'fail', message: 'User already exists with this email' });
+    }
+
+    // ভেন্ডর রেজিস্টার করলে roles অ্যারেতে 'customer' এবং 'vendor' দুটোই থাকতে পারে, 
+    // যাতে সে কেনাকাটাও করতে পারে আবার বিক্রিও করতে পারে!
+    const vendor = await User.create({
+      name,
+      email,
+      password,
+      roles: ['customer', 'vendor'], 
+      isVerified: false, // অ্যাডমিন ভেরিফাই না করা পর্যন্ত ফলস থাকবে
+      shopDetails: {
+        shopName,
+        shopDescription,
+        shopAddress,
+        businessLicense,
+        bankAccount,
+      },
+    });
+
+    const token = generateToken(vendor._id);
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Vendor registered successfully! Waiting for admin verification.',
+      token,
+      data: {
+        _id: vendor._id,
+        name: vendor.name,
+        email: vendor.email,
+        roles: vendor.roles,
+        isVerified: vendor.isVerified,
+        shopDetails: vendor.shopDetails,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// @desc    Create a Shop Manager for a Vendor
+// @route   POST /api/v1/auth/create-shop-manager
+// @access  Private (Vendor Only)
+const createShopManager = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    // ১. রিকোয়েস্ট পাঠানো ইউজার আসলেই ভেন্ডর কি না এবং সে ভেরিফাইড কি না চেক করা
+    if (!req.user.roles.includes('vendor')) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'Only vendors can create shop managers.',
+      });
+    }
+
+    if (!req.user.isVerified) {
+      return res.status(403).json({
+        status: 'fail',
+        message: 'Your vendor account must be verified by admin before adding managers.',
+      });
+    }
+
+    // ২. ইমেইল অলরেডি এক্সিস্ট করে কি না চেক করা
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({
+        status: 'fail',
+        message: 'A user with this email already exists',
+      });
+    }
+
+    // ৩. শপ ম্যানেজার তৈরি করা
+    const shopManager = await User.create({
+      name,
+      email,
+      password,
+      roles: ['shop_manager'], // রোল শপ ম্যানেজার
+      parentVendor: req.user._id, // কার আন্ডারে কাজ করবে, তার আইডি
+      isVerified: true, // স্টাফ বা ম্যানেজারদের আলাদা ভেরিফিকেশন লাগে না
+    });
+
+    res.status(201).json({
+      status: 'success',
+      message: 'Shop manager created successfully!',
+      data: {
+        _id: shopManager._id,
+        name: shopManager.name,
+        email: shopManager.email,
+        roles: shopManager.roles,
+        parentVendor: shopManager.parentVendor,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// @desc    Get all shop managers of the logged-in vendor
+// @route   GET /api/v1/auth/shop-managers
+// @access  Private (Vendor Only)
+const getMyShopManagers = async (req, res) => {
+  try {
+    const managers = await User.find({
+      parentVendor: req.user._id,
+      roles: 'shop_manager',
+    }).select('-password');
+
+    res.status(200).json({
+      status: 'success',
+      results: managers.length,
+      data: { managers },
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// @desc    Update Shop Manager details or status (Vendor Only)
+// @route   PATCH /api/v1/auth/shop-managers/:id
+// @access  Private (Vendor Only)
+const updateShopManager = async (req, res) => {
+  try {
+    const managerId = req.params.id;
+    const { name, email, isActive } = req.body;
+
+    const manager = await User.findById(managerId);
+
+    if (!manager || !manager.roles.includes('shop_manager')) {
+      return res.status(404).json({ status: 'fail', message: 'Shop manager not found' });
+    }
+
+    // সিকিউরিটি চেক: এই ম্যানেজার কি আসলেই এই ভেন্ডরের আন্ডারে?
+    if (manager.parentVendor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ status: 'fail', message: 'Unauthorized action' });
+    }
+
+    if (name) manager.name = name;
+    if (email) manager.email = email;
+    if (typeof isActive === 'boolean') manager.isActive = isActive; // ইউজার মডেলে isActive ফিল্ড থাকলে কাজ করবে
+
+    await manager.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Shop manager updated successfully',
+      data: { manager },
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// @desc    Remove (Fire) a Shop Manager (Vendor Only)
+// @route   DELETE /api/v1/auth/shop-managers/:id
+// @access  Private (Vendor Only)
+const removeShopManager = async (req, res) => {
+  try {
+    const managerId = req.params.id;
+
+    const manager = await User.findById(managerId);
+
+    if (!manager || !manager.roles.includes('shop_manager')) {
+      return res.status(404).json({ status: 'fail', message: 'Shop manager not found' });
+    }
+
+    // সিকিউরিটি চেক
+    if (manager.parentVendor.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ status: 'fail', message: 'Unauthorized action' });
+    }
+
+    await User.findByIdAndDelete(managerId);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Shop manager removed (fired) successfully',
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// @desc    Login user
 // @route   POST /api/v1/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // ১. ইমেইল দিয়ে ইউজার খোঁজা এবং পাসওয়ার্ড ফিল্ডটি সিলেক্ট করা (যেহেতু মডেলে select: false করা ছিল)
     const user = await User.findOne({ email }).select('+password');
 
-    // ২. ইউজার আছে কি না এবং পাসওয়ার্ড মিলে কি না চেক করা
-    if (user && (await user.matchPassword(password))) {
-      const token = generateToken(user._id, user.role);
-
-      res.status(200).json({
-        status: 'success',
-        message: 'Login successful',
-        token,
-        data: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-      });
-    } else {
-      res.status(401).json({
-        status: 'fail',
-        message: 'Invalid email or password',
-      });
+    if (!user || !(await user.matchPassword(password))) {
+      return res.status(401).json({ status: 'fail', message: 'Invalid email or password' });
     }
+
+    const token = generateToken(user._id);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Logged in successfully',
+      token,
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        roles: user.roles,
+        isVerified: user.isVerified,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// @desc    Update user profile (Name, Email)
+// @route   PATCH /api/v1/auth/update-profile
+// @access  Private (All Logged-in Users)
+const updateProfile = async (req, res) => {
+  try {
+    const { name, email } = req.body;
+
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ status: 'fail', message: 'User not found' });
+    }
+
+    if (name) user.name = name;
+    if (email) {
+      // ইমেইল চেঞ্জ করতে চাইলে সেটি অলরেডি অন্য কেউ ব্যবহার করছে কি না চেক করা
+      const emailExists = await User.findOne({ email });
+      if (emailExists && emailExists._id.toString() !== user._id.toString()) {
+        return res.status(400).json({ status: 'fail', message: 'Email is already in use' });
+      }
+      user.email = email;
+    }
+
+    const updatedUser = await user.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Profile updated successfully',
+      data: {
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        roles: updatedUser.roles,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+};
+
+// @desc    Update password
+// @route   PATCH /api/v1/auth/update-password
+// @access  Private (All Logged-in Users)
+const updatePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ status: 'fail', message: 'Please provide current and new passwords' });
+    }
+
+    // পাসওয়ার্ডসহ ইউজারকে খোঁজা (যেহেতু মডেলে select: false করা আছে)
+    const user = await User.findById(req.user._id).select('+password');
+
+    // বর্তমান পাসওয়ার্ড সঠিক কি না চেক করা
+    const isMatched = await user.matchPassword(currentPassword);
+    if (!isMatched) {
+      return res.status(401).json({ status: 'fail', message: 'Current password is incorrect' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ status: 'fail', message: 'New password must be at least 6 characters' });
+    }
+
+    user.password = newPassword; // মডেলের pre-save হুক নিজে থেকেই এটি হ্যাশ করে নেবে
+    await user.save();
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Password updated successfully',
+    });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
   }
@@ -86,25 +339,13 @@ const loginUser = async (req, res) => {
 
 // @desc    Get user profile
 // @route   GET /api/v1/auth/profile
-// @access  Private (Needs Token)
+// @access  Private
 const getUserProfile = async (req, res) => {
   try {
-    // req.user মিডলওয়্যার থেকে অলরেডি পাওয়া যাচ্ছে
     const user = req.user;
-
-    if (!user) {
-      return res.status(404).json({ status: 'fail', message: 'User not found' });
-    }
-
     res.status(200).json({
       status: 'success',
-      data: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        createdAt: user.createdAt,
-      },
+      data: { user },
     });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
@@ -116,9 +357,8 @@ const getUserProfile = async (req, res) => {
 // @access  Private/Admin
 const getAllVendors = async (req, res) => {
   try {
-    // শুধু যাদের রোল 'vendor' তাদের খুঁজে বের করা
-    const vendors = await User.find({ role: 'vendor' }).select('-password');
-    
+    // যাদের roles অ্যারেতে 'vendor' আছে তাদের খুঁজে বের করা
+    const vendors = await User.find({ roles: 'vendor' }).select('-password');
     res.status(200).json({
       status: 'success',
       results: vendors.length,
@@ -129,170 +369,41 @@ const getAllVendors = async (req, res) => {
   }
 };
 
-// @desc    Verify or approve a vendor (Admin Only)
+// @desc    Verify Vendor Account (Admin Only)
 // @route   PATCH /api/v1/auth/vendors/:id/verify
 // @access  Private/Admin
 const verifyVendor = async (req, res) => {
   try {
     const vendor = await User.findById(req.params.id);
 
-    if (!vendor || vendor.role !== 'vendor') {
-      return res.status(404).json({
-        status: 'fail',
-        message: 'Vendor not found with this ID',
-      });
+    if (!vendor || !vendor.roles.includes('vendor')) {
+      return res.status(404).json({ status: 'fail', message: 'Vendor not found' });
     }
 
-    // ভেরিফিকেশন স্ট্যাটাস টগল বা ট্রু করা
     vendor.isVerified = true;
     await vendor.save();
 
     res.status(200).json({
       status: 'success',
-      message: `Vendor '${vendor.name}' has been verified successfully!`,
-      data: { 
-        _id: vendor._id,
-        name: vendor.name,
-        email: vendor.email,
-        role: vendor.role,
-        isVerified: vendor.isVerified,
-      },
+      message: `Vendor '${vendor.shopDetails.shopName || vendor.name}' has been verified successfully!`,
+      data: { vendor },
     });
   } catch (error) {
     res.status(500).json({ status: 'error', message: error.message });
   }
 };
 
-// @desc    Update user role & verification status (Admin Only)
-// @route   PATCH /api/v1/auth/users/:id/role
-// @access  Private/Admin
-const updateUserRole = async (req, res) => {
-  try {
-    const { role, isVerified } = req.body;
-
-    // ১. রোল ভ্যালিডেশন (সঠিক রোল পাঠানো হয়েছে কি না)
-    if (role && !['customer', 'vendor', 'shop_manager', 'admin'].includes(role)) {
-      return res.status(400).json({ status: 'fail', message: 'Invalid role type' });
-    }
-
-    // ২. আপডেট করার জন্য অবজেক্ট তৈরি
-    const updateData = {};
-    if (role) updateData.role = role;
-    if (typeof isVerified === 'boolean') updateData.isVerified = isVerified;
-
-    // ৩. ডেটাবেসে ইউজার খুঁজে আপডেট করা
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password');
-
-    if (!user) {
-      return res.status(404).json({ status: 'fail', message: 'User not found' });
-    }
-
-    res.status(200).json({
-      status: 'success',
-      message: `User role updated successfully to '${user.role}'`,
-      data: { user },
-    });
-  } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message });
-  }
-};
-
-// @desc    Apply to become a vendor
-// @route   POST /api/v1/auth/apply-vendor
-// @access  Private (LoggedIn Users)
-const applyForVendor = async (req, res) => {
-  try {
-    const { shopName, shopDescription, shopAddress, businessLicense, bankAccount } = req.body;
-
-    const user = await User.findById(req.user._id);
-
-    if (user.role === 'vendor') {
-      return res.status(400).json({ status: 'fail', message: 'You are already a vendor.' });
-    }
-
-    if (user.vendorApplicationStatus === 'pending') {
-      return res.status(400).json({ status: 'fail', message: 'Your vendor application is already under review.' });
-    }
-
-    // শপের তথ্য এবং আবেদনের স্ট্যাটাস সেভ করা
-    user.shopDetails = {
-      shopName,
-      shopDescription,
-      shopAddress,
-      businessLicense,
-      bankAccount,
-    };
-    user.vendorApplicationStatus = 'pending';
-
-    await user.save();
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Vendor application submitted successfully! Waiting for admin approval.',
-      data: {
-        vendorApplicationStatus: user.vendorApplicationStatus,
-        shopDetails: user.shopDetails,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message });
-  }
-};
-
-// @desc    Approve or Reject Vendor Application (Admin Only)
-// @route   PATCH /api/v1/auth/vendor-applications/:id
-// @access  Private/Admin
-const approveVendorApplication = async (req, res) => {
-  try {
-    const { status } = req.body; // status: 'approved' or 'rejected'
-
-    if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ status: 'fail', message: 'Status must be approved or rejected' });
-    }
-
-    const user = await User.findById(req.params.id);
-
-    if (!user || user.vendorApplicationStatus !== 'pending') {
-      return res.status(404).json({ status: 'fail', message: 'No pending vendor application found for this user.' });
-    }
-
-    if (status === 'approved') {
-      user.role = 'vendor';
-      user.isVerified = true;
-      user.vendorApplicationStatus = 'approved';
-    } else {
-      user.vendorApplicationStatus = 'rejected';
-    }
-
-    await user.save();
-
-    res.status(200).json({
-      status: 'success',
-      message: `Vendor application has been ${status}.`,
-      data: {
-        userId: user._id,
-        role: user.role,
-        isVerified: user.isVerified,
-        vendorApplicationStatus: user.vendorApplicationStatus,
-      },
-    });
-  } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message });
-  }
-};
-
-// module.exports-এ getUserProfile যুক্ত করে দিন
 module.exports = {
-  registerUser,
+  registerCustomer,
+  registerVendor,
+  createShopManager,
+  getMyShopManagers,
+  updateShopManager,
+  removeShopManager,
   loginUser,
-  getUserProfile, 
+  updateProfile,
+  updatePassword,
+  getUserProfile,
   getAllVendors,
   verifyVendor,
-  updateUserRole,
-  applyForVendor,
-  approveVendorApplication,
 };

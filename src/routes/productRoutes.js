@@ -1,21 +1,40 @@
 const express = require('express');
-const { 
-  createProduct, 
-  getAllProducts 
+const {
+  createProduct,
+  getAllProducts,
+  getSingleProduct,
+  updateProduct,
+  deleteProduct,
 } = require('../controllers/productController');
+
 const { protect, authorize } = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
-// 🔓 Public Route: সবাই সব প্রোডাক্ট দেখতে পারবে
+// 🔓 Public Routes (সবাই দেখতে পারবে)
 router.get('/', getAllProducts);
+router.get('/:id', getSingleProduct);
 
-// 🔒 Protected & Authorized Route: শুধু 'vendor' বা 'shop_manager' প্রোডাক্ট আপলোড করতে পারবে
+// 🔒 Protected & Authorized Routes (শুধু Vendor, Shop Manager এবং Admin এক্সেস পাবে)
 router.post(
-  '/', 
-  protect, 
-  authorize('vendor', 'shop_manager'), 
+  '/',
+  protect,
+  authorize('vendor', 'shop_manager', 'admin'),
   createProduct
+);
+
+router.patch(
+  '/:id',
+  protect,
+  authorize('vendor', 'shop_manager', 'admin'),
+  updateProduct
+);
+
+router.delete(
+  '/:id',
+  protect,
+  authorize('vendor', 'shop_manager', 'admin'),
+  deleteProduct
 );
 
 module.exports = router;
