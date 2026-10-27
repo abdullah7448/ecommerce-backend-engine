@@ -38,4 +38,20 @@ app.use('/api/v1/cart', cartRoutes);
 const orderRoutes = require('./routes/orderRoutes');
 app.use('/api/v1/orders', orderRoutes);
 
+//Payment Routes
+const paymentRoutes = require('./routes/paymentRoutes');
+app.use('/api/v1/payments', paymentRoutes);
+
+//Review Routes
+const reviewRoutes = require('./routes/reviewRoutes');
+app.use('/api/v1/products/:productId/reviews', reviewRoutes);
+
+//Dashboard Routes
+const dashboardRoutes = require('./routes/dashboardRoutes');
+app.use('/api/v1/dashboard', dashboardRoutes);
+
+//Coupon Routes
+const couponRoutes = require('./routes/couponRoutes');
+app.use('/api/v1/coupons', couponRoutes);
+
 module.exports = app;

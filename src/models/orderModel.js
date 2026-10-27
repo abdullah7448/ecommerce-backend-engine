@@ -48,15 +48,22 @@ const orderSchema = new mongoose.Schema(
       postalCode: { type: String },
     },
 
-    paymentMethod: {
+   paymentMethod: {
       type: String,
       enum: ['COD', 'Online', 'SSLCommerz', 'Bkash'],
       default: 'COD',
     },
     paymentStatus: {
       type: String,
-      enum: ['Pending', 'Paid', 'Failed'],
+      enum: ['Pending', 'Paid', 'Failed', 'Cancelled'],
       default: 'Pending',
+    },
+    // 🌟 পেমেন্ট ট্র্যাকিং ফিল্ডস
+    transactionId: {
+      type: String,
+    },
+    valId: {
+      type: String, // SSLCommerz Validation ID
     },
 
     totalAmount: {
